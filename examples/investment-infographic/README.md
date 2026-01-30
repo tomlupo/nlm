@@ -1,20 +1,28 @@
 # Investment Process Infographic Example
 
-This example demonstrates how to use `nlm` (NotebookLM CLI) to transform a simple investment process document into structured, infographic-ready content.
+This example demonstrates how to use `nlm` (NotebookLM CLI) and [Paper2Any](https://github.com/OpenDCAI/Paper2Any) to transform a simple investment process document into visual infographics.
+
+The pipeline has two stages:
+
+1. **nlm** extracts structured content (timelines, mindmaps, briefing docs) from the source document via NotebookLM
+2. **Paper2Any** renders that content into editable visual outputs (SVG diagrams, PPTX presentations)
 
 ## What It Does
 
-Takes a markdown document describing the 6-phase investment process and uses nlm to generate:
+Takes a markdown document describing the 6-phase investment process and produces:
 
-| Output | nlm Command | Infographic Use |
-|--------|-------------|-----------------|
-| Study Guide | `generate-guide` | Content backbone and key points |
-| Timeline | `timeline` | Horizontal timeline / Gantt chart |
-| Mindmap | `mindmap` | Radial process diagram |
-| Briefing Doc | `briefing-doc` | One-page executive dashboard |
-| FAQ | `faq` | Sidebar callout boxes |
-| Outline | `outline` | Hierarchical structure diagram |
-| Audio Overview | `audio-create` | Narrated walkthrough |
+| Output | Tool | Command | Format |
+|--------|------|---------|--------|
+| Study Guide | nlm | `generate-guide` | Markdown |
+| Timeline | nlm | `timeline` | Markdown |
+| Mindmap | nlm | `mindmap` | Markdown |
+| Briefing Doc | nlm | `briefing-doc` | Markdown |
+| FAQ | nlm | `faq` | Markdown |
+| Outline | nlm | `outline` | Markdown |
+| Audio Overview | nlm | `audio-create` | Audio |
+| Process Roadmap | Paper2Any | `paper2figure --graph-type tech_route` | SVG + PPTX |
+| Architecture Diagram | Paper2Any | `paper2figure --graph-type model_arch` | SVG + PPTX |
+| Slide Deck | Paper2Any | `paper2ppt` | PPTX |
 
 ## The Investment Process
 
@@ -33,18 +41,35 @@ Define Goals --> Research --> Allocate --> Execute --> Monitor --> Rebalance
 5. **Monitoring** - Performance tracking, review schedule, alert triggers
 6. **Rebalancing** - Calendar/threshold-based rebalancing, tax efficiency
 
+## Prerequisites
+
+- **nlm** installed and authenticated (`nlm auth`)
+- **Paper2Any** (optional, for visual rendering):
+  ```bash
+  git clone https://github.com/OpenDCAI/Paper2Any.git
+  cd Paper2Any
+  conda create -n paper2any python=3.11
+  conda activate paper2any
+  pip install -r requirements-base.txt
+  pip install -r requirements-paper.txt
+  conda install -c conda-forge tectonic
+  ```
+- An LLM API key for Paper2Any (set `DF_API_KEY` and `DF_API_URL` env vars)
+
 ## Quick Start
 
 ```bash
 # Authenticate with NotebookLM (one-time setup)
 nlm auth
 
-# Run the shell script
-chmod +x create-infographic.sh
+# Run with nlm only (generates structured markdown)
 ./create-infographic.sh
 
+# Run the full pipeline including Paper2Any visual rendering
+./create-infographic.sh --with-paper2any
+
 # Or use Python
-python create-infographic.py
+python create-infographic.py --with-paper2any
 ```
 
 ## Usage
@@ -77,9 +102,11 @@ python create-infographic.py --skip-audio
 
 ### Step-by-Step (Manual)
 
-Run each nlm command individually to understand the process:
+Run each command individually to understand the process:
 
 ```bash
+# --- Stage 1: nlm content extraction ---
+
 # 1. Create a notebook
 NOTEBOOK_ID=$(nlm create "Investment Process Infographic")
 
@@ -100,10 +127,41 @@ nlm outline "$NOTEBOOK_ID" "$SOURCE_ID" > outline.md
 # 5. Create audio overview
 nlm audio-create "$NOTEBOOK_ID" "Walk through the investment process phases"
 
-# 6. Explore interactively
+# --- Stage 2: Paper2Any visual rendering ---
+
+PAPER2ANY_DIR="/path/to/Paper2Any"
+
+# 6. Generate process roadmap (SVG + PPTX)
+python "$PAPER2ANY_DIR/script/run_paper2figure_cli.py" \
+  --input timeline.md \
+  --graph-type tech_route \
+  --style cartoon \
+  --aspect-ratio 16:9 \
+  --language en \
+  --output-dir ./visuals
+
+# 7. Generate architecture diagram (SVG + PPTX)
+python "$PAPER2ANY_DIR/script/run_paper2figure_cli.py" \
+  --input overview.md \
+  --graph-type model_arch \
+  --style cartoon \
+  --language en \
+  --output-dir ./visuals
+
+# 8. Generate slide deck from briefing doc (PPTX)
+python "$PAPER2ANY_DIR/script/run_paper2ppt_cli.py" \
+  --input briefing.md \
+  --page-count 10 \
+  --style "Modern financial style with clean charts" \
+  --language en \
+  --output-dir ./visuals
+
+# --- Explore and clean up ---
+
+# 9. Explore interactively
 nlm chat "$NOTEBOOK_ID"
 
-# 7. Clean up when done
+# 10. Clean up when done
 nlm rm "$NOTEBOOK_ID"
 ```
 
@@ -120,17 +178,74 @@ investment-infographic-output/
   06-outline.md          # Content outline (Python script only)
   notebook-id.txt        # Notebook ID for further interaction
   source-id.txt          # Source ID for targeted commands
+  visuals/               # Paper2Any outputs (with --with-paper2any)
+    roadmap.pptx         # Process roadmap (editable PPTX)
+    roadmap.svg          # Process roadmap (vector)
+    architecture.pptx    # Investment architecture diagram (editable PPTX)
+    architecture.svg     # Investment architecture diagram (vector)
+    slides.pptx          # Full slide deck from briefing doc
 ```
 
 ## Turning Output into Visual Infographics
 
-The generated content is structured text designed to feed into visual design tools:
+### With Paper2Any (automated)
+
+Pass `--with-paper2any` to either script to automatically render visuals:
+
+```bash
+# Set Paper2Any location and API key
+export PAPER2ANY_DIR=/path/to/Paper2Any
+export DF_API_KEY=your-api-key
+export DF_API_URL=https://api.openai.com/v1  # or compatible endpoint
+
+./create-infographic.sh --with-paper2any
+```
+
+Paper2Any produces:
+
+| nlm Output | Paper2Any Mode | Result |
+|------------|----------------|--------|
+| Timeline markdown | `paper2figure --graph-type tech_route` | SVG + PPTX process roadmap |
+| Overview guide | `paper2figure --graph-type model_arch` | SVG + PPTX architecture diagram |
+| Briefing doc | `paper2ppt` | Editable PPTX slide deck |
+
+### Without Paper2Any (manual design)
+
+The structured text outputs can also be used with other visual design tools:
 
 - **Timeline** output maps to horizontal flow diagrams (Figma, Canva, Mermaid)
 - **Mindmap** output maps to radial or tree diagrams
 - **Briefing doc** provides content for single-page dashboards
 - **FAQ** provides content for callout boxes and sidebars
 - **Outline** provides the hierarchy for nested layouts
+
+## Pipeline Diagram
+
+```
+                        nlm                              Paper2Any
+                   (content extraction)              (visual rendering)
+
+                 +------------------+
+investment   --> | create notebook  |
+-process.md     | add source       |
+                 +------------------+
+                         |
+          +--------------+--------------+
+          |              |              |
+          v              v              v
+    +-----------+  +-----------+  +-----------+
+    | timeline  |  | mindmap   |  | briefing  |     ... other nlm outputs
+    +-----------+  +-----------+  +-----------+
+          |              |              |
+          v              v              v
+    +-----------+  +-----------+  +-----------+
+    | tech_route|  | model_arch|  | paper2ppt |     Paper2Any renderers
+    +-----------+  +-----------+  +-----------+
+          |              |              |
+          v              v              v
+     roadmap.svg   architecture.svg  slides.pptx    Final visual outputs
+     roadmap.pptx  architecture.pptx
+```
 
 ## Files
 

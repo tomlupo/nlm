@@ -1,16 +1,19 @@
 #!/bin/bash
-# create-infographic.sh - Turn an investment process into infographic-style content using nlm
+# create-infographic.sh - Turn an investment process into visual infographics using nlm + Paper2Any
 #
-# This script demonstrates how to use nlm to transform investment process
-# documentation into structured, infographic-ready outputs including
-# timelines, mindmaps, briefing documents, and audio overviews.
+# This script demonstrates a two-stage pipeline:
+#   1. nlm extracts structured content (timelines, mindmaps, briefing docs) from source material
+#   2. Paper2Any renders the content into editable SVG diagrams and PPTX presentations
 #
 # Prerequisites:
 #   - nlm installed and authenticated (run: nlm auth)
 #   - Source content file: investment-process.md (included in this directory)
+#   - Paper2Any (optional): https://github.com/OpenDCAI/Paper2Any
+#     Set PAPER2ANY_DIR, DF_API_KEY, and DF_API_URL env vars to enable
 #
 # Usage:
 #   ./create-infographic.sh
+#   ./create-infographic.sh --with-paper2any
 #   ./create-infographic.sh --output-dir ./my-output
 #   ./create-infographic.sh --skip-audio
 
@@ -21,6 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_FILE="${SCRIPT_DIR}/investment-process.md"
 OUTPUT_DIR="${1:---output-dir}"
 SKIP_AUDIO=false
+WITH_PAPER2ANY=false
+PAPER2ANY_DIR="${PAPER2ANY_DIR:-}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -33,15 +38,30 @@ while [[ $# -gt 0 ]]; do
             SKIP_AUDIO=true
             shift
             ;;
+        --with-paper2any)
+            WITH_PAPER2ANY=true
+            shift
+            ;;
+        --paper2any-dir)
+            PAPER2ANY_DIR="$2"
+            shift 2
+            ;;
         --help|-h)
-            echo "Usage: $0 [--output-dir DIR] [--skip-audio]"
+            echo "Usage: $0 [--output-dir DIR] [--skip-audio] [--with-paper2any] [--paper2any-dir DIR]"
             echo ""
-            echo "Transform investment process documentation into infographic-style content."
+            echo "Transform investment process documentation into visual infographics."
             echo ""
             echo "Options:"
-            echo "  --output-dir DIR   Output directory (default: ./investment-infographic-output)"
-            echo "  --skip-audio       Skip audio overview generation"
-            echo "  --help, -h         Show this help message"
+            echo "  --output-dir DIR     Output directory (default: ./investment-infographic-output)"
+            echo "  --skip-audio         Skip audio overview generation"
+            echo "  --with-paper2any     Enable Paper2Any visual rendering (SVG + PPTX)"
+            echo "  --paper2any-dir DIR  Path to Paper2Any repo (or set PAPER2ANY_DIR)"
+            echo "  --help, -h           Show this help message"
+            echo ""
+            echo "Paper2Any env vars:"
+            echo "  PAPER2ANY_DIR  Path to Paper2Any repo"
+            echo "  DF_API_KEY     LLM API key for Paper2Any"
+            echo "  DF_API_URL     LLM API endpoint for Paper2Any"
             exit 0
             ;;
         *)
@@ -51,7 +71,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Default output directory if still set to flag value
-if [[ "$OUTPUT_DIR" == "--output-dir" || "$OUTPUT_DIR" == "--skip-audio" ]]; then
+if [[ "$OUTPUT_DIR" == "--output-dir" || "$OUTPUT_DIR" == "--skip-audio" || "$OUTPUT_DIR" == "--with-paper2any" ]]; then
     OUTPUT_DIR="./investment-infographic-output"
 fi
 
@@ -89,16 +109,41 @@ if [[ ! -f "$SOURCE_FILE" ]]; then
     exit 1
 fi
 
+# Validate Paper2Any setup if requested
+if [[ "$WITH_PAPER2ANY" == true ]]; then
+    if [[ -z "$PAPER2ANY_DIR" ]]; then
+        log_error "Paper2Any directory not set. Use --paper2any-dir or set PAPER2ANY_DIR."
+        log_error "Install: git clone https://github.com/OpenDCAI/Paper2Any.git"
+        exit 1
+    fi
+    if [[ ! -f "$PAPER2ANY_DIR/script/run_paper2figure_cli.py" ]]; then
+        log_error "Paper2Any not found at: $PAPER2ANY_DIR"
+        log_error "Install: git clone https://github.com/OpenDCAI/Paper2Any.git"
+        exit 1
+    fi
+    if [[ -z "${DF_API_KEY:-}" ]]; then
+        log_warn "DF_API_KEY not set. Paper2Any requires an LLM API key."
+    fi
+fi
+
 # Calculate total steps
-TOTAL_STEPS=8
-if [[ "$SKIP_AUDIO" == true ]]; then
-    TOTAL_STEPS=7
+TOTAL_STEPS=7
+if [[ "$SKIP_AUDIO" != true ]]; then
+    TOTAL_STEPS=$((TOTAL_STEPS + 1))
+fi
+if [[ "$WITH_PAPER2ANY" == true ]]; then
+    TOTAL_STEPS=$((TOTAL_STEPS + 3))  # roadmap + architecture + slides
 fi
 
 echo "============================================"
 echo " Investment Process Infographic Generator"
-echo " Powered by nlm (NotebookLM CLI)"
+echo " Powered by nlm + Paper2Any"
 echo "============================================"
+echo ""
+echo "Stage 1: nlm (content extraction)"
+if [[ "$WITH_PAPER2ANY" == true ]]; then
+    echo "Stage 2: Paper2Any (visual rendering)"
+fi
 echo ""
 
 # --- Step 1: Create output directory ---
@@ -175,6 +220,72 @@ if [[ "$SKIP_AUDIO" != true ]]; then
     fi
 fi
 
+# --- Paper2Any visual rendering (optional) ---
+CURRENT_STEP=8
+if [[ "$SKIP_AUDIO" == true ]]; then
+    CURRENT_STEP=7
+fi
+
+if [[ "$WITH_PAPER2ANY" == true ]]; then
+    VISUALS_DIR="$OUTPUT_DIR/visuals"
+    mkdir -p "$VISUALS_DIR"
+
+    # --- Generate process roadmap (tech_route) from timeline ---
+    log_step "$CURRENT_STEP" "[Paper2Any] Generating process roadmap from timeline..."
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    if [[ -s "$OUTPUT_DIR/02-timeline.md" ]]; then
+        if python "$PAPER2ANY_DIR/script/run_paper2figure_cli.py" \
+            --input "$OUTPUT_DIR/02-timeline.md" \
+            --graph-type tech_route \
+            --style cartoon \
+            --aspect-ratio 16:9 \
+            --language en \
+            --output-dir "$VISUALS_DIR/roadmap" 2>/dev/null; then
+            log_success "Process roadmap generated in $VISUALS_DIR/roadmap/"
+        else
+            log_warn "Roadmap generation failed (check DF_API_KEY and DF_API_URL)"
+        fi
+    else
+        log_warn "Skipping roadmap: timeline output is empty"
+    fi
+
+    # --- Generate architecture diagram (model_arch) from overview ---
+    log_step "$CURRENT_STEP" "[Paper2Any] Generating architecture diagram from overview..."
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    if [[ -s "$OUTPUT_DIR/01-overview-guide.md" ]]; then
+        if python "$PAPER2ANY_DIR/script/run_paper2figure_cli.py" \
+            --input "$OUTPUT_DIR/01-overview-guide.md" \
+            --graph-type model_arch \
+            --style cartoon \
+            --language en \
+            --output-dir "$VISUALS_DIR/architecture" 2>/dev/null; then
+            log_success "Architecture diagram generated in $VISUALS_DIR/architecture/"
+        else
+            log_warn "Architecture diagram generation failed"
+        fi
+    else
+        log_warn "Skipping architecture diagram: overview output is empty"
+    fi
+
+    # --- Generate slide deck (paper2ppt) from briefing doc ---
+    log_step "$CURRENT_STEP" "[Paper2Any] Generating slide deck from briefing document..."
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    if [[ -s "$OUTPUT_DIR/04-briefing-doc.md" ]]; then
+        if python "$PAPER2ANY_DIR/script/run_paper2ppt_cli.py" \
+            --input "$OUTPUT_DIR/04-briefing-doc.md" \
+            --page-count 10 \
+            --style "Modern financial style with clean charts" \
+            --language en \
+            --output-dir "$VISUALS_DIR/slides" 2>/dev/null; then
+            log_success "Slide deck generated in $VISUALS_DIR/slides/"
+        else
+            log_warn "Slide deck generation failed"
+        fi
+    else
+        log_warn "Skipping slide deck: briefing document output is empty"
+    fi
+fi
+
 # --- Generate summary report ---
 cat > "$OUTPUT_DIR/00-index.md" << EOF
 # Investment Process Infographic - Generated Content
@@ -216,11 +327,24 @@ Use the briefing document to create a single-page dashboard showing:
 - Portfolio allocation pie charts (Conservative / Balanced / Growth)
 - Rebalancing triggers checklist
 
+## Paper2Any Visual Outputs
+
+If generated with \`--with-paper2any\`, the \`visuals/\` directory contains:
+
+| Directory | Contents | Format |
+|-----------|----------|--------|
+| \`visuals/roadmap/\` | Investment process roadmap | SVG + PPTX |
+| \`visuals/architecture/\` | Process architecture diagram | SVG + PPTX |
+| \`visuals/slides/\` | Executive briefing slide deck | PPTX |
+
+Paper2Any: https://github.com/OpenDCAI/Paper2Any
+
 ## Next Steps
 
 1. Review generated content in this directory
-2. Use your preferred design tool (Figma, Canva, PowerPoint) to create visuals
-3. For deeper analysis, use interactive chat:
+2. Open PPTX files to edit diagrams and slides directly
+3. Use SVG files for web or print-ready infographics
+4. For deeper analysis, use interactive chat:
    \`\`\`bash
    nlm chat $NOTEBOOK_ID
    \`\`\`
@@ -244,10 +368,21 @@ echo "Notebook ID:      $NOTEBOOK_ID"
 echo ""
 echo "Generated files:"
 ls -la "$OUTPUT_DIR"/*.md 2>/dev/null | awk '{print "  " $NF}'
+if [[ "$WITH_PAPER2ANY" == true && -d "$OUTPUT_DIR/visuals" ]]; then
+    echo ""
+    echo "Paper2Any visuals:"
+    find "$OUTPUT_DIR/visuals" -type f \( -name "*.svg" -o -name "*.pptx" -o -name "*.png" \) 2>/dev/null | while read -r f; do
+        echo "  $f"
+    done
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Review the generated content in $OUTPUT_DIR/"
-echo "  2. Use 'nlm chat $NOTEBOOK_ID' for interactive exploration"
-echo "  3. Design your infographic using the structured outputs"
+if [[ "$WITH_PAPER2ANY" == true ]]; then
+    echo "  2. Open PPTX/SVG files in $OUTPUT_DIR/visuals/ to edit visuals"
+else
+    echo "  2. Run with --with-paper2any to generate SVG/PPTX visuals"
+fi
+echo "  3. Use 'nlm chat $NOTEBOOK_ID' for interactive exploration"
 echo ""
 echo "To clean up: nlm rm $NOTEBOOK_ID"
